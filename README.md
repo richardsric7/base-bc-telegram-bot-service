@@ -40,6 +40,17 @@ go run ./cmd/bot
 docker compose up --build
 ```
 
+## Run on Android (Termux)
+
+Every push to any branch is cross-compiled for `android/arm64` and published
+as a downloadable zip (via GitHub Actions) on that branch's rolling
+`android-<branch>` release. See [termux/README.md](./termux/README.md) for
+the full install/auto-start walkthrough, or cross-compile locally with:
+
+```sh
+./scripts/build-android.sh
+```
+
 ## Regenerating contract bindings
 
 The deployable `contracts/ERC20Token.sol` contract's Go bindings live in

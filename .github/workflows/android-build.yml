@@ -1,0 +1,75 @@
+name: Android build
+
+# Cross-compiles cmd/bot for android/arm64 on every branch push and publishes
+# it as a downloadable zip: a build artifact on the workflow run, plus a
+# rolling per-branch pre-release (tag android-<branch>) so there's a stable
+# link that always points at the latest build for that branch.
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build android/arm64 binary
+        run: ./scripts/build-android.sh dist/stage/bot
+
+      - name: Stage Termux run/boot scripts
+        run: |
+          cp termux/run.sh dist/stage/run.sh
+          mkdir -p dist/stage/boot
+          cp termux/boot/start-bot.sh dist/stage/boot/start-bot.sh
+          cp termux/README.md dist/stage/README.md
+          cp .env.example dist/stage/.env.example
+          chmod +x dist/stage/bot dist/stage/run.sh dist/stage/boot/start-bot.sh
+
+      - name: Compute release metadata
+        id: meta
+        run: |
+          branch_safe=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          short_sha=$(git rev-parse --short HEAD)
+          zip_name="base-bot-android-arm64-${branch_safe}.zip"
+          echo "branch_safe=${branch_safe}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "zip_name=${zip_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Package zip
+        run: |
+          mkdir -p dist/out
+          (cd dist/stage && zip -r "../out/${{ steps.meta.outputs.zip_name }}" .)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.zip_name }}
+          path: dist/out/${{ steps.meta.outputs.zip_name }}
+          retention-days: 30
+
+      - name: Publish/update rolling branch release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ steps.meta.outputs.branch_safe }}
+          name: "Android build: ${{ github.ref_name }} (${{ steps.meta.outputs.short_sha }})"
+          body: |
+            Auto-built android/arm64 binary for branch `${{ github.ref_name }}` at
+            commit ${{ github.sha }}.
+
+            See `termux/README.md` (also included in the zip) for how to install
+            and run it under Termux on Android.
+
+            This release is updated on every push to this branch — it always
+            reflects the latest commit, not a specific version.
+          prerelease: true
+          files: dist/out/${{ steps.meta.outputs.zip_name }}
