@@ -2,7 +2,7 @@
 
 Golang service that works with a Telegram bot to let you create and manage
 ERC-20 tokens on the Base blockchain network, and swap assets on wallets you
-control. See [PLAN.md](./PLAN.md) for the full architecture and design.
+control. See [initial-build-plan.md](./initial-build-plan.md) for the full architecture and design.
 
 This is a self-custody tool: wallets are generated or imported by you and
 stored encrypted at rest; only Telegram user IDs you list in
