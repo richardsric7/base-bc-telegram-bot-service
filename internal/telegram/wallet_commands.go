@@ -10,11 +10,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/richardsric7/base-bc-telegram-bot-service/internal/chain"
 	"github.com/richardsric7/base-bc-telegram-bot-service/internal/storage"
 	"github.com/richardsric7/base-bc-telegram-bot-service/internal/wallet"
 )
 
-func (b *Bot) cmdWalletNew(user *storage.User, chatID int64, label string) {
+func (b *Bot) cmdWalletNew(ctx context.Context, user *storage.User, chatID int64, label string) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		b.reply(chatID, "Usage: /wallet_new <label>")
@@ -25,7 +26,7 @@ func (b *Bot) cmdWalletNew(user *storage.User, chatID int64, label string) {
 		b.reply(chatID, walletErrorMessage(err))
 		return
 	}
-	b.reply(chatID, fmt.Sprintf("✅ Created wallet %q\nAddress: %s", label, w.Address))
+	b.reply(chatID, fmt.Sprintf("✅ Created wallet %q\nAddress: %s\n\n%s", label, w.Address, b.activationStatusLine(ctx, w.Address)))
 }
 
 func (b *Bot) cmdWalletImportStart(chatID int64, label string) {
@@ -68,12 +69,15 @@ func (b *Bot) cmdWalletBalance(ctx context.Context, user *storage.User, chatID i
 		b.reply(chatID, walletErrorMessage(err))
 		return
 	}
-	bal, err := b.chain.BalanceOf(ctx, common.HexToAddress(w.Address))
+	status, err := b.chain.CheckActivation(ctx, common.HexToAddress(w.Address))
 	if err != nil {
 		b.reply(chatID, "Failed to read balance: "+err.Error())
 		return
 	}
-	b.reply(chatID, fmt.Sprintf("%s (%s)\nBalance: %s ETH", w.Label, w.Address, weiToDecimalString(bal, 18)))
+	b.reply(chatID, fmt.Sprintf(
+		"%s (%s)\nBalance: %s ETH\nTransactions sent: %d\n\n%s",
+		w.Label, w.Address, weiToDecimalString(status.Balance, 18), status.Nonce, formatActivation(status),
+	))
 }
 
 // continueFlow handles a plain-text message while a chat is mid multi-step
@@ -87,13 +91,13 @@ func (b *Bot) continueFlow(ctx context.Context, user *storage.User, msg *tgbotap
 
 	switch sess.Flow {
 	case flowWalletImport:
-		b.continueWalletImport(user, msg, sess)
+		b.continueWalletImport(ctx, user, msg, sess)
 	case flowTokenCreate:
 		b.continueTokenCreate(ctx, user, msg, sess)
 	}
 }
 
-func (b *Bot) continueWalletImport(user *storage.User, msg *tgbotapi.Message, sess *session) {
+func (b *Bot) continueWalletImport(ctx context.Context, user *storage.User, msg *tgbotapi.Message, sess *session) {
 	label := sess.Data["label"]
 	key := strings.TrimSpace(msg.Text)
 
@@ -109,7 +113,26 @@ func (b *Bot) continueWalletImport(user *storage.User, msg *tgbotapi.Message, se
 		b.reply(msg.Chat.ID, walletErrorMessage(err))
 		return
 	}
-	b.reply(msg.Chat.ID, fmt.Sprintf("✅ Imported wallet %q\nAddress: %s", label, w.Address))
+	b.reply(msg.Chat.ID, fmt.Sprintf("✅ Imported wallet %q\nAddress: %s\n\n%s", label, w.Address, b.activationStatusLine(ctx, w.Address)))
+}
+
+// activationStatusLine reads an address's on-chain nonce/balance and
+// returns a one-line human summary of whether it has ever been used or
+// funded. It never fails loudly — if the RPC call errors, it says so
+// briefly rather than blocking the wallet creation/import flow.
+func (b *Bot) activationStatusLine(ctx context.Context, address string) string {
+	status, err := b.chain.CheckActivation(ctx, common.HexToAddress(address))
+	if err != nil {
+		return "⚠️ Couldn't check on-chain activation status: " + err.Error()
+	}
+	return formatActivation(status)
+}
+
+func formatActivation(status *chain.ActivationStatus) string {
+	if status.Activated {
+		return "✅ Activated on-chain — this address has a balance or transaction history."
+	}
+	return "⚠️ Not yet activated on-chain — this address has no balance and has never sent a transaction. Send it some ETH before using it to sign transactions (it needs ETH to pay gas)."
 }
 
 func walletErrorMessage(err error) string {

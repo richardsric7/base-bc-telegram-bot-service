@@ -1,5 +1,6 @@
 // Package telegram wires the Telegram bot interface to the chain/wallet/
-// token/swap services: command routing, an allow-list auth gate, per-chat
+// token/swap services: command routing, a registration gate (an admin
+// bootstrap code plus admin-issued invite codes for everyone else), per-chat
 // session state for guided multi-step flows, and inline-keyboard
 // confirmation for every state-changing on-chain action.
 package telegram
@@ -91,15 +92,15 @@ func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	if msg.From == nil {
 		return
 	}
-	if !b.cfg.IsAllowed(msg.From.ID) {
-		b.reply(msg.Chat.ID, "Unauthorized. This bot is restricted to a configured allow-list of Telegram user IDs.")
+
+	user, err := b.resolveUser(msg.From)
+	if err != nil {
+		log.Printf("telegram: resolve user: %v", err)
+		b.reply(msg.Chat.ID, "Internal error loading your account. Please try again.")
 		return
 	}
-
-	user, err := b.store.GetOrCreateUser(msg.From.ID, msg.From.UserName, storage.RoleOwner)
-	if err != nil {
-		log.Printf("telegram: get/create user: %v", err)
-		b.reply(msg.Chat.ID, "Internal error loading your account. Please try again.")
+	if user == nil {
+		b.handleUnregistered(ctx, msg)
 		return
 	}
 
@@ -127,7 +128,7 @@ func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 		b.cmdTx(msg.Chat.ID, args)
 
 	case "wallet_new":
-		b.cmdWalletNew(user, msg.Chat.ID, args)
+		b.cmdWalletNew(ctx, user, msg.Chat.ID, args)
 	case "wallet_import":
 		b.cmdWalletImportStart(msg.Chat.ID, args)
 	case "wallet_list":
@@ -157,13 +158,24 @@ func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	case "swap_execute":
 		b.cmdSwapExecute(ctx, user, msg.Chat.ID, msg.From.ID, args)
 
+	case "generate_code":
+		b.cmdGenerateCode(user, msg.Chat.ID)
+	case "codes":
+		b.cmdListCodes(user, msg.Chat.ID)
+	case "revoke_code":
+		b.cmdRevokeCode(user, msg.Chat.ID, args)
+
 	default:
 		b.reply(msg.Chat.ID, "Unknown command. Send /help to see everything I support.")
 	}
 }
 
 func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
-	if cq.From == nil || !b.cfg.IsAllowed(cq.From.ID) {
+	if cq.From == nil {
+		return
+	}
+	registered, err := b.resolveUser(cq.From)
+	if err != nil || registered == nil {
 		b.answerCallback(cq.ID, "Unauthorized")
 		return
 	}
@@ -283,6 +295,11 @@ func (b *Bot) cmdHelp(chatID int64) {
 *Swaps*
 /swap_quote <fromToken|ETH> <toToken|ETH> <amount>
 /swap_execute <wallet> <fromToken|ETH> <toToken|ETH> <amount> <slippageBps>
+
+*Admin*
+/generate_code — create a 6-digit invite code for a new user (admin-only)
+/codes — list your active, unused invite codes (admin-only)
+/revoke_code <code> — invalidate an unused invite code (admin-only)
 
 *Utility*
 /tx <hash> — look up a transaction

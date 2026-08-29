@@ -87,6 +87,41 @@ func (c *Client) BalanceOf(ctx context.Context, address common.Address) (*big.In
 	return c.eth.BalanceAt(ctx, address, nil)
 }
 
+// NonceAt returns the number of transactions ever sent from address
+// (its confirmed transaction count / account nonce).
+func (c *Client) NonceAt(ctx context.Context, address common.Address) (uint64, error) {
+	return c.eth.NonceAt(ctx, address, nil)
+}
+
+// ActivationStatus reports whether an EOA has any on-chain footprint yet.
+// Base (like other EVM chains) doesn't require an explicit "activation"
+// step, but a freshly generated wallet with zero balance and zero
+// transactions can't pay gas for its own first transaction, so callers use
+// this to warn the operator it needs funding before it can sign anything.
+type ActivationStatus struct {
+	Activated bool
+	Nonce     uint64
+	Balance   *big.Int
+}
+
+// CheckActivation reads an address's nonce and balance and reports whether
+// it has ever been used on-chain (nonce > 0) or funded (balance > 0).
+func (c *Client) CheckActivation(ctx context.Context, address common.Address) (*ActivationStatus, error) {
+	nonce, err := c.NonceAt(ctx, address)
+	if err != nil {
+		return nil, fmt.Errorf("chain: read nonce: %w", err)
+	}
+	balance, err := c.BalanceOf(ctx, address)
+	if err != nil {
+		return nil, fmt.Errorf("chain: read balance: %w", err)
+	}
+	return &ActivationStatus{
+		Activated: nonce > 0 || balance.Sign() > 0,
+		Nonce:     nonce,
+		Balance:   balance,
+	}, nil
+}
+
 // SuggestGasPrice proxies ethclient's gas price oracle.
 func (c *Client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return c.eth.SuggestGasPrice(ctx)
