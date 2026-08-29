@@ -1,0 +1,6 @@
+.env
+/data/
+*.db
+/.bin/
+node_modules/
+/internal/contracts/erc20/build/
