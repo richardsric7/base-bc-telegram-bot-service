@@ -1,12 +1,13 @@
 name: Android build
 
-# Cross-compiles cmd/bot for android/arm64 on every branch push and publishes
-# it as a downloadable zip: a build artifact on the workflow run, plus a
-# rolling per-branch pre-release (tag android-<branch>) so there's a stable
-# link that always points at the latest build for that branch.
+# Cross-compiles cmd/bot for android/arm64 whenever a branch matching
+# android-* is pushed, and publishes it as a downloadable zip: a build
+# artifact on the workflow run, plus a rolling per-branch pre-release
+# (tag android-<branch>) so there's a stable link that always points at the
+# latest build for that branch.
 on:
   push:
-    branches: ["**"]
+    branches: ["android-*"]
 
 permissions:
   contents: write
